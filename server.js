@@ -17,7 +17,14 @@ const interviewRouter = require("./routes/interviewRoutes")
 const app = express()
 const port = process.env.PORT || 5000
 
-app.use(cors())
+
+app.use(cors({
+    origin: [
+        "http://localhost:3000",
+        "https://ai-resume-analyzer-fe.vercel.app"
+    ],
+    credentials: true
+}))
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
