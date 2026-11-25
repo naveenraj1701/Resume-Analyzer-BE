@@ -1,37 +1,34 @@
 
 const Interview = require("../models/interviewModel")
-const Resume = require("../models/resumeModel")
 const Job = require("../models/jobModel")
-const generateInterviewQuestions = require("../services/interviewService")
+const { generateInterviewQuestions, evaluateInterviewAnswer } = require("../services/interviewService")
 
 const createInterview = async (req, res) => {
     try {
-        const { resumeId, jobId, interviewType } = req.body
+        const { jobId, skills, interviewType } = req.body
 
-        if (!resumeId || !jobId) {
-            return res.send({ message: "Resume and job are required" })
+        if (!jobId || !skills || !skills.length) {
+            return res.send({ message: "Job and selected skills are required" })
         }
 
-        const resume = await Resume.findOne({
-            _id: resumeId,
-            userId: req.userId
-        })
-
-        if (!resume) {
-            return res.send({ message: "Resume not found" })
+        if (!Array.isArray(skills)) {
+            return res.send({ message: "Skills must be an array" })
         }
 
-        const job = await Job.findOne({
-            _id: jobId,
-            userId: req.userId
-        })
+        const job = await Job.findById(jobId)
 
         if (!job) {
             return res.send({ message: "Job not found" })
         }
 
-        if (!resume.extractedText) {
-            return res.send({ message: "Resume text is not available" })
+        const jobSkills = job.requiredSkills || []
+
+        const selectedSkills = skills.filter(skill =>
+            jobSkills.includes(skill)
+        )
+
+        if (!selectedSkills.length) {
+            return res.send({ message: "Please select valid skills for this job" })
         }
 
         const selectedType = interviewType || "Mixed"
@@ -43,9 +40,8 @@ const createInterview = async (req, res) => {
         }
 
         const generatedData = await generateInterviewQuestions(
-            resume.extractedText,
-            job.jobDescription,
-            job.requiredSkills || [],
+            job.jobTitle,
+            selectedSkills,
             selectedType
         )
 
@@ -55,7 +51,6 @@ const createInterview = async (req, res) => {
 
         const interview = new Interview({
             userId: req.userId,
-            resumeId,
             jobId,
             interviewType: selectedType,
             questions: generatedData.questions
@@ -74,4 +69,57 @@ const createInterview = async (req, res) => {
     }
 }
 
-module.exports = { createInterview }
+
+const evaluateAnswer = async (req, res) => {
+    try {
+        const { interviewId, questionIndex, userAnswer } = req.body
+
+        if (!interviewId || questionIndex === undefined) {
+            return res.send({ message: "Interview ID and question index are required" })
+        }
+
+        const interview = await Interview.findOne({
+            _id: interviewId,
+            userId: req.userId
+        })
+
+        if (!interview) {
+            return res.send({ message: "Interview not found" })
+        }
+
+        const question = interview.questions[questionIndex]
+
+        if (!question) {
+            return res.send({ message: "Question not found" })
+        }
+
+        const answer = userAnswer || ""
+
+        const evaluation = await evaluateInterviewAnswer(
+            question.question,
+            answer,
+            question.sampleAnswer,
+            question.category
+        )
+
+        question.userAnswer = answer
+        question.feedback = evaluation.feedback
+        question.score = Math.max(0, Math.min(100, Number(evaluation.score) || 0))
+
+        await interview.save()
+
+        res.send({
+            message: "Answer evaluated successfully",
+            score: question.score,
+            feedback: question.feedback,
+            suggestions: evaluation.suggestions || []
+        })
+
+    } catch (error) {
+        console.log(error)
+        res.send({ message: "Error evaluating interview answer" })
+    }
+}
+
+
+module.exports = { createInterview, evaluateAnswer }

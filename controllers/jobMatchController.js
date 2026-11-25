@@ -2,10 +2,18 @@ const Resume = require("../models/resumeModel")
 const Job = require("../models/jobModel")
 const JobMatch = require("../models/jobMatchModel")
 const matchResumeWithJob = require("../services/jobMatchService")
+const User = require("../models/userModel")
 
 const createJobMatch = async (req, res) => {
     try {
         const { resumeId, jobId } = req.body
+
+        const user = await User.findById(req.userId)
+
+        if (!user || user.isPremium !== true)
+            return res.status(403).send({
+                message: "Premium subscription required. Please unlock AI Job Matching."
+            })
 
         if (!resumeId || !jobId)
             return res.status(400).send({ message: "Resume ID and Job ID are required" })
@@ -21,10 +29,7 @@ const createJobMatch = async (req, res) => {
         if (!resume.extractedText)
             return res.status(400).send({ message: "Please extract the resume text first" })
 
-        const job = await Job.findOne({
-            _id: jobId,
-            userId: req.userId
-        })
+       const job = await Job.findById(jobId)
 
         if (!job)
             return res.status(404).send({ message: "Job not found" })

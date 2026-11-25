@@ -63,14 +63,15 @@ const loginUser = async (req, res) => {
             user: {
                 id: existingUser._id,
                 email: existingUser.email,
-                name: existingUser.name
+                name: existingUser.name,
+                role: existingUser.role || "user",
+                isPremium: existingUser.isPremium === true
             }
         })
 
     } catch (err) {
         console.log("Error in login user", err)
         return res.status(500).send({ message: err.message })
-
     }
 }
 

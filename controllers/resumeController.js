@@ -171,10 +171,115 @@ const getAllResumes = async (req, res) => {
     }
 }
 
+const replaceResume = async (req, res) => {
+    let uploadResult
+    let newResume
+
+    try {
+        const file = req.file
+
+        if (!file)
+            return res.status(400).send({ message: "Please upload a PDF resume" })
+
+        uploadResult = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+                {
+                    resource_type: "raw",
+                    folder: "AIResumeAnalyzer/resumes",
+                    public_id: `${Date.now()}-${file.originalname.replace(/\.pdf$/i, "")}.pdf`
+                },
+                (error, result) => error ? reject(error) : resolve(result)
+            )
+
+            Readable.from(file.buffer).pipe(uploadStream)
+        })
+
+        const response = await fetch(uploadResult.secure_url)
+
+        if (!response.ok)
+            throw new Error("Unable to download PDF from Cloudinary")
+
+        const buffer = Buffer.from(await response.arrayBuffer())
+
+        const parser = new PDFParse({ data: buffer })
+        const extractedResult = await parser.getText()
+        await parser.destroy()
+
+        const extractedText = extractedResult.text
+
+        if (!extractedText.trim())
+            throw new Error("Unable to extract text from this PDF")
+
+        const analysis = await analyzeResumeWithAI(extractedText)
+
+        newResume = new Resume({
+            userId: req.userId,
+            fileName: file.originalname,
+            fileUrl: uploadResult.secure_url,
+            publicId: uploadResult.public_id,
+            extractedText,
+            score: analysis.score,
+            skills: analysis.skills,
+            experience: analysis.experience,
+            feedback: JSON.stringify({
+                strengths: analysis.strengths,
+                weaknesses: analysis.weaknesses,
+                suggestions: analysis.suggestions
+            })
+        })
+
+        await newResume.save()
+
+        const oldResumes = await Resume.find({
+            userId: req.userId,
+            _id: { $ne: newResume._id }
+        })
+
+        for (const oldResume of oldResumes) {
+            try {
+                await cloudinary.uploader.destroy(oldResume.publicId, {
+                    resource_type: "raw"
+                })
+            } catch (error) {
+                console.log("Old resume Cloudinary deletion failed:", error.message)
+            }
+        }
+
+        await Resume.deleteMany({
+            userId: req.userId,
+            _id: { $ne: newResume._id }
+        })
+
+        return res.status(200).send({
+            message: "Resume replaced successfully",
+            resume: newResume,
+            analysis
+        })
+
+    } catch (error) {
+        if (uploadResult?.public_id) {
+            try {
+                await cloudinary.uploader.destroy(uploadResult.public_id, {
+                    resource_type: "raw"
+                })
+            } catch (cleanupError) {
+                console.log("New resume cleanup failed:", cleanupError.message)
+            }
+        }
+
+        if (newResume?._id) {
+            await Resume.findByIdAndDelete(newResume._id)
+        }
+
+        return res.status(500).send({ message: error.message })
+    }
+}
+
 
 module.exports = {
     uploadResume,
     extractResumeText,
     analyzeResume,
-    getAllResumes
+    getAllResumes,
+    replaceResume
 }

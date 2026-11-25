@@ -29,6 +29,14 @@ const jobSchema = new mongoose.Schema({
     jobType: {
         type: String,
         default: "Full-Time"
+    },
+    applyEnabled: {
+        type: Boolean,
+        default: false
+    },
+    applyLink: {
+        type: String,
+        default: ""
     }
 }, {
     timestamps: true

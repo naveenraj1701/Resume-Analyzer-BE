@@ -2,19 +2,27 @@ const crypto = require("crypto")
 const razorpay = require("../config/razorPay")
 const Razorpay = require("razorpay")
 const Payment = require("../models/paymentModel")
+const User = require("../models/userModel")
 
 const createOrder = async (req, res) => {
     try {
-        const { amount } = req.body
+        const { planId } = req.body
 
-        if (!amount || !Number.isFinite(Number(amount)) || Number(amount) <= 0)
-            return res.status(400).send({ message: "Valid amount is required" })
+        const plans = {
+            "premium-job-match": {
+                name: "AI Job matching premium",
+                amount: 50000
+            }
+        }
 
-        const amountInPaisa = Math.round(Number(amount) * 100)
+        const selectedPlan = plans[planId]
+
+        if (!selectedPlan)
+            return res.status(404).send({ message: "Invalid Plan ID" })
         const receipt = `Receipt_${Date.now()}`
 
         const options = {
-            amount: amountInPaisa,
+            amount: selectedPlan.amount,
             currency: "INR",
             receipt
         }
@@ -65,36 +73,70 @@ const verifyPayment = async (req, res) => {
         })
 
         if (!payment)
-            return res.status(404).send({message: "Payment order not found"})
+            return res.status(404).send({ message: "Payment order not found" })
 
-        if (payment.status === "success")
-            return res.status(200).send({message: "Payment already verified"})
+        if (payment.status === "success") {
+            await User.findByIdAndUpdate(req.userId, {
+                isPremium: true
+            })
+
+            return res.status(200).send({
+                message: "Payment already verified",
+                isPremium: true
+            })
+        }
 
         const generatedSignature = crypto.createHmac(
             "sha256",
             process.env.RazorPay_Key_SECRET
         ).update(`${razorpay_order_id}|${razorpay_payment_id}`)
-        .digest("hex")
-          console.log("Signature :", generatedSignature, "razorpay :", razorpay_signature)
+            .digest("hex")
 
-        if (generatedSignature !== razorpay_signature)
+        const generatedBuffer = Buffer.from(generatedSignature, "hex")
+        const receivedBuffer = Buffer.from(razorpay_signature, "hex")
+
+        if (
+            generatedBuffer.length !== receivedBuffer.length ||
+            !crypto.timingSafeEqual(generatedBuffer, receivedBuffer)
+        )
             return res.status(400).send({ message: "Invalid payment signature" })
-        
+
+        const razorpayPayment = await razorpay.payments.fetch(razorpay_payment_id)
+
+        if (razorpayPayment.order_id !== razorpay_order_id)
+            return res.status(400).send({ message: "Payment order mismatch" })
+
+        if (razorpayPayment.status !== "captured")
+            return res.status(400).send({ message: "Payment is not captured yet" })
+
+        if (
+            razorpayPayment.amount !== payment.amount ||
+            razorpayPayment.currency !== payment.currency
+        )
+            return res.status(400).send({ message: "Payment amount or currency mismatch" })
+
+        await User.findByIdAndUpdate(req.userId, {
+            isPremium: true
+        })
+
         payment.paymentId = razorpay_payment_id
         payment.signature = razorpay_signature
         payment.status = "success"
 
         await payment.save()
 
-        return res.status(200).send({message: "Payment verified successfully"})
+        return res.status(200).send({
+            message: "Payment verified successfully",
+            isPremium: true
+        })
 
     } catch (err) {
-         console.error("Verify Payment Error:", err);
+        console.error("Verify Payment Error:", err)
 
-        return res.status(500).json({
+        return res.status(500).send({
             success: false,
             message: "Payment verification failed"
-        });
+        })
     }
 }
 
@@ -117,4 +159,4 @@ const getPaymentStatus = async (req, res) => {
     }
 }
 
-module.exports = {createOrder, verifyPayment, getPaymentStatus}
+module.exports = { createOrder, verifyPayment, getPaymentStatus }
