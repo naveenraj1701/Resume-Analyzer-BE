@@ -10,6 +10,7 @@ const paymentRouter = require("./routes/paymentRoutes")
 const jobUrlRouter = require("./routes/jobUrlRoutes")
 const applicationRouter = require("./routes/applicationRoutes")
 const interviewRouter = require("./routes/interviewRoutes")
+const adminRouter = require("./routes/adminRoutes")
 
 
 //Instance
@@ -36,6 +37,7 @@ app.use("/api/payment", paymentRouter)
 app.use("/api/job-url", jobUrlRouter)
 app.use("/api/application", applicationRouter)
 app.use("/api/interview", interviewRouter)
+app.use("/api/admin", adminRouter)
 
 mongoose.connect(process.env.MONGODB_URI)
     .then(() => console.log("MongoDB connected successfully"))
